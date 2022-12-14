@@ -43,42 +43,75 @@ class PurpleAirAPI():
         PurpleAirAPI requests.
     """
 
-    def __init__(self, your_api_read_key):
+    def __init__(self, your_api_read_key=None, your_api_write_key=None):
         """
             :param str your_api_read_key: A valid PurpleAirAPI Read key
+            :param str your_api_write_key: A valid PurpleAirAPI Write key
         """
+
+        if your_api_read_key is None and your_api_write_key is None:
+            raise PurpleAirAPIError(
+                "Ensure one or both of 'your_api_read_key'/'your_api_write_key' key(s) are provided")
 
         # Save off the API key for internal usage
         self._your_api_read_key = your_api_read_key
+        self._your_api_write_key = your_api_write_key
 
         # Create the base API request string. Must be HTTPS.
-        self._base_api_request_string = "https://api.purpleair.com/v1/"
+        self._base_api_v1_request_string = "https://api.purpleair.com/v1/"
 
         # Place holders for information we care about
-        self._api_version = ""
-        self._api_key_last_checked = 0
-        self._api_key_type = ""
+        self._api_versions = {}
+        self._api_keys_last_checked = {}
+        self._api_key_types = {}
 
-        retval = self._check_an_api_key()
-        if retval:
-            print("Successfully authenticated with the PurpleAirAPI")
+        retval_api_read_key = None
+        retval_api_write_key = None
 
-    def _check_an_api_key(self):
+        if your_api_read_key:
+            retval_api_read_key = self._check_an_api_key(your_api_read_key)
+
+        if your_api_write_key:
+            retval_api_write_key = self._check_an_api_key(your_api_write_key)
+
+        debug_log(self._api_versions)
+        debug_log(self._api_keys_last_checked)
+        debug_log(self._api_key_types)
+
+        if (retval_api_read_key and self._api_key_types[your_api_read_key] == "READ"):
+            print("PurpleAirAPI: Successfully authenticated read key")
+
+        else:
+            raise PurpleAirAPIError(
+                "Ensure 'your_api_read_key' is a read key.")
+
+        if (retval_api_write_key and self._api_key_types[your_api_write_key] == "WRITE"):
+            print("PurpleAirAPI: Successfully authenticated write key")
+
+        else:
+            raise PurpleAirAPIError(
+                "Ensure 'your_api_write_key' is a write key")
+
+    def _check_an_api_key(self, str_api_key_to_check):
         """
-            A method to check if an API key is valid.
+            An internal class helper method to check if an API key is valid.
+
+            :param str str_api_key_to_check: A valid PurpleAirAPI key to check
+
+            :return True, if an API key can be successfully verified.
         """
-        request_url = self._base_api_request_string + "keys"
+        request_url = self._base_api_v1_request_string + "keys"
         my_request = requests.get(request_url, headers={
-                                  "X-API-Key": str(self._your_api_read_key)})
+                                  "X-API-Key": str(str_api_key_to_check)})
 
         the_request_text_as_json = json.loads(my_request.text)
         debug_log(the_request_text_as_json)
 
         if my_request.status_code in SUCCESS_CODE_LIST:
             # We good :) get the request text
-            self._api_version = the_request_text_as_json["api_version"]
-            self._api_key_last_checked = the_request_text_as_json["time_stamp"]
-            self._api_key_type = the_request_text_as_json["api_key_type"]
+            self._api_versions[str_api_key_to_check] = the_request_text_as_json["api_version"]
+            self._api_keys_last_checked[str_api_key_to_check] = the_request_text_as_json["time_stamp"]
+            self._api_key_types[str_api_key_to_check] = the_request_text_as_json["api_key_type"]
             my_request.close()
             del my_request
             return True
@@ -87,36 +120,29 @@ class PurpleAirAPI():
             raise PurpleAirAPIError(
                 f"""{my_request.status_code}: {the_request_text_as_json['error']} - {the_request_text_as_json['description']}""")
 
-    def recheck_api_key(self):
-        """
-            A method to recheck the API Key provided.
-        """
-
-        return self._check_an_api_key()
-
     @property
-    def get_api_version(self):
+    def get_api_versions(self):
         """
-            A method to return the API version being used.
+            A method to return the API versions being used for both read/write keys.
         """
 
-        return self._api_version
+        return self._api_versions
 
     @property
     def get_api_key_last_checked(self):
         """
-            A method to return the timestamp of when the API Key was last checked.
+            A method to return the timestamp of when the API read/write keys were last checked.
         """
 
-        return self._api_key_last_checked
+        return self._api_keys_last_checked
 
     @property
     def get_api_key_type(self):
         """
-            A method to return the API version being used.
+            A method to return the API key types being used.
         """
 
-        return self._api_key_type
+        return self._api_key_types
 
     def request_sensor_data(self, sensor_index, read_key=None, fields=None):
         """
@@ -145,7 +171,7 @@ class PurpleAirAPI():
             :return A python dictionary containing the payload response
         """
 
-        request_url = self._base_api_request_string + \
+        request_url = self._base_api_v1_request_string + \
             "sensors/" + f"{sensor_index}"
 
         optional_parameters_dict = {
@@ -153,7 +179,7 @@ class PurpleAirAPI():
             "fields": fields
         }
 
-        return self._send_url_request(request_url, optional_parameters_dict)
+        return self._send_url_get_request(request_url, self._your_api_read_key, optional_parameters_dict)
 
     def request_multiple_sensors_data(self, fields, location_type=None, read_keys=None, show_only=None, modified_since=None, max_age=None, nwlng=None, nwlat=None, selng=None, selat=None):
         """
@@ -223,7 +249,7 @@ class PurpleAirAPI():
             :return A python dictionary containing the payload response                    
         """
 
-        request_url = self._base_api_request_string + \
+        request_url = self._base_api_v1_request_string + \
             "sensors/" + f"?fields={fields}"
 
         # Add to the request_url string depending on what optional parameters are
@@ -239,7 +265,7 @@ class PurpleAirAPI():
             "selng": selng,
             "selat": selat}
 
-        return self._send_url_request(request_url, optional_parameters_dict)
+        return self._send_url_get_request(request_url, self._your_api_read_key, optional_parameters_dict)
 
     def request_sensor_historic_data(self, sensor_index, fields, read_key=None, start_timestamp=None, end_timestamp=None, average=None):
         """
@@ -290,7 +316,7 @@ class PurpleAirAPI():
                                For field descriptions, please see the 'sensor data fields'. section.
         """
 
-        request_url = self._base_api_request_string + \
+        request_url = self._base_api_v1_request_string + \
             "sensors/" + f"{sensor_index}" + "/history" + f"?fields={fields}"
 
         # Add to the request_url string depending on what optional parameters are
@@ -302,9 +328,97 @@ class PurpleAirAPI():
             "modified_since": end_timestamp,
             "average": average}
 
-        return self._send_url_request(request_url, optional_parameters_dict)
+        return self._send_url_get_request(request_url, self._your_api_read_key, optional_parameters_dict)
 
-    def _send_url_request(self, request_url, optional_parameters_dict={}):
+    def post_create_group(self, name):
+        """
+            A method to create a group for sensors.
+
+            :param int sensor_index: The sensor_index as found in the JSON for this specific sensor.
+        """
+
+        post_url = self._base_api_v1_request_string + \
+            f"groups"
+
+        return self._send_url_post_request(post_url, self._your_api_write_key, {"name": name})
+
+    def post_create_member(self, group_id, sensor_index=None, sensor_id=None, owner_email=None, location_type=None):
+        """
+            Using a sensor_id (Parameters Option 1)
+            The sensor_id should be exactly as printed on the label on the sensor. When no owner_email is provided, the sensor has to be marked as public.
+
+            :param int group_id: The group_id of the group to add a member to. This group must be owned by the api_key.
+
+            :param str sensor_id: The sensor_id of the new member sensor. This must be AS PRINTED on the sensor’s label.
+
+            Using a sensor_index (Parameters Option 2)
+            The sensor_index can be found in lists for example from a /sensors api call. When no owner_email is provided, the sensor has to be marked as public.
+
+            :param int group_id: The group_id of the group to add a member to. This group must be owned by the api_key.
+
+            :param int sensor_index: The sensor_index of the new member as found in the JSON for this specific sensor.
+
+            Using sensor_id with a private sensor by specifying owner_email and optionally location_type. (Parameters Option 3)
+            This example will produce an error if any provided value does not match the current configuration of the sensor. Note, too many incorrect attempts may disable your API key, so do not try guessing the email!!
+
+            :param int group_id: The group_id of the group to add a member to. This group must be owned by the api_key.
+
+            :param str sensor_id: The sensor_id of the new member sensor. This must be AS PRINTED on the sensor’s label.
+
+            :param str owner_email: An email address that matches the Owner email as set by previously completing the PurpleAir registration form at www.purpleair.com/register.
+
+            :param (optional) int location_type: The expected location_type of the new member.
+                                                 Possible values are: 0 = Outside or 1 = Inside.
+                                                 If the target member is not of this type, an error will result.
+                                                 NOTE: This value is required if the sensor in question is marked as ‘private’ on the registration form.
+        """
+
+        post_url = self._base_api_v1_request_string + \
+            f"groups/{group_id}/members"
+
+        if sensor_index is None and sensor_id is not None and owner_email is None and location_type is None:
+            # We good, use the sensor index
+            debug_log("post_create_member - option 1")
+            return self._send_url_post_request(post_url, self._your_api_write_key, {"sensor_id": str(sensor_id)})
+
+        elif sensor_index is not None and sensor_id is None and owner_email is None and location_type is None:
+            # We good, use the sensor id
+            debug_log("post_create_member - option 2")
+            return self._send_url_post_request(post_url, self._your_api_write_key, {"sensor_index": sensor_index})
+
+        elif sensor_index is None and sensor_id is not None and owner_email is not None:
+            # We good, use the private sensor id.
+            debug_log("post_create_member - option 3")
+            return self._send_url_post_request(post_url, self._your_api_write_key, {"sensor_id": str(sensor_id), "owner_email": owner_email, "location_type": location_type})
+
+        else:
+            raise PurpleAirAPIError(
+                "Invalid configuration of method parameters!")
+
+    def post_delete_group(self, group_id):
+        """
+            A method to delete a group for sensors.
+
+            :param int group_id: The group_id of the group to delete
+        """
+
+        post_url = self._base_api_v1_request_string + \
+            f"groups/{group_id}"
+
+        return self._send_url_delete_request(post_url, self._your_api_write_key)
+
+    def post_delete_member(self, group_id, member_id):
+        """
+            :param int group_id: The group_id of the group in which member_id is in.
+            :param int member_id: The member_id to delete.
+        """
+
+        post_url = self._base_api_v1_request_string + \
+            f"groups/{group_id}/members/{member_id}"
+
+        return self._send_url_delete_request(post_url, self._your_api_write_key)
+
+    def _send_url_get_request(self, request_url, api_key_to_use, optional_parameters_dict={}):
         """
             A class helper to send the url request. It can also add onto the
             'request_url' string if 'optional_parameters_dict' are provided.
@@ -330,20 +444,100 @@ class PurpleAirAPI():
 
         debug_log(request_url)
         my_request = requests.get(request_url, headers={
-                                  "X-API-Key": str(self._your_api_read_key)})
+                                  "X-API-Key": str(api_key_to_use)})
 
-        the_request_text_as_json = json.loads(my_request.text)
-        debug_log(the_request_text_as_json)
+        the_request_text_as_json = self._convert_requests_text_to_json(
+            my_request.text)
 
-        if my_request.status_code in SUCCESS_CODE_LIST:
-            my_request.close()
-            del my_request
+        if self._verify_request_status_codes(my_request.status_code):
             return the_request_text_as_json
 
-        elif my_request.status_code in ERROR_CODES_LIST:
-            my_request.close()
+        else:
             raise PurpleAirAPIError(
                 f"""{my_request.status_code}: {the_request_text_as_json['error']} - {the_request_text_as_json['description']}""")
+
+    def _send_url_post_request(self, request_url, api_key_to_use, json_post_parameters={}):
+        """
+            A class helper to send the url request. It can also add onto the
+            'request_url' string if 'optional_parameters_dict' are provided.
+
+            :param str request_url: The constructed string url request string.
+        """
+
+        debug_log(request_url)
+        if json_post_parameters:
+            debug_log(json_post_parameters)
+            my_request = requests.post(request_url, headers={
+                "X-API-Key": str(api_key_to_use)}, json=json_post_parameters)
+
+        else:
+            debug_log(json_post_parameters)
+            my_request = requests.post(request_url, headers={
+                "X-API-Key": str(api_key_to_use)})
+
+        the_request_text_as_json = self._convert_requests_text_to_json(
+            my_request.text)
+
+        if self._verify_request_status_codes(my_request.status_code):
+            return the_request_text_as_json
+
+        else:
+            raise PurpleAirAPIError(
+                f"""{my_request.status_code}: {the_request_text_as_json['error']} - {the_request_text_as_json['description']}""")
+
+    def _send_url_delete_request(self, request_url, api_key_to_use, json_post_parameters={}):
+        """
+            A class helper to send the url request. It can also add onto the
+            'request_url' string if 'optional_parameters_dict' are provided.
+
+            :param str request_url: The constructed string url request string.
+        """
+
+        debug_log(request_url)
+        if json_post_parameters:
+            my_request = requests.delete(request_url, headers={
+                "X-API-Key": str(api_key_to_use)}, json=json_post_parameters)
+
+        else:
+            my_request = requests.delete(request_url, headers={
+                "X-API-Key": str(api_key_to_use)})
+
+        the_request_text_as_json = self._convert_requests_text_to_json(
+            my_request.text)
+
+        if self._verify_request_status_codes(my_request.status_code):
+            return the_request_text_as_json
+
+        else:
+            raise PurpleAirAPIError(
+                f"""{my_request.status_code}: {the_request_text_as_json['error']} - {the_request_text_as_json['description']}""")
+
+    @staticmethod
+    def _verify_request_status_codes(status_code) -> bool:
+        """
+            A helper to check those status codes.
+            True if in SUCCESS_CODE_LIST
+            False if in ERROR_CODES_LIST
+        """
+
+        if status_code in SUCCESS_CODE_LIST:
+            return True
+
+        elif status_code in ERROR_CODES_LIST:
+            return False
+
+    @staticmethod
+    def _convert_requests_text_to_json(text) -> None | dict:
+        """
+            A helper to convert request.text to json.
+        """
+
+        the_request_text_as_json = None
+        if text:
+            the_request_text_as_json = json.loads(text)
+            debug_log(the_request_text_as_json)
+
+        return the_request_text_as_json
 
     def _sanitize_sensor_data_from_paa(self, paa_return_data):
         """
